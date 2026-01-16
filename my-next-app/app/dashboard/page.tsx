@@ -5,32 +5,52 @@ import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 
 export default async function DashboardPage() {
-  const cookieStore = await cookies()
-  const myEmail = cookieStore.get('session')?.value
-  
-  if (!myEmail) redirect('/login')
+  let myEmail = "";
+  let me: any = null;
+  let validUsers: any[] = [];
 
-  const me: any = await redis.get(`user:${myEmail}`)
-  
-  if (!me) {
-    (await cookies()).delete('session')
+  try {
+    const cookieStore = await cookies()
+    myEmail = cookieStore.get('session')?.value || ""
+    
+    if (!myEmail) {
+      redirect('/login')
+    }
+
+    // 1. ดึงข้อมูลตัวเอง
+    me = await redis.get(`user:${myEmail}`)
+    
+    if (!me) {
+      // ถ้ามีคุกกี้แต่ไม่มีข้อมูลใน DB ให้ล้างคุกกี้แล้วเด้งออก
+      (await cookies()).delete('session')
+      redirect('/login')
+    }
+
+    // อัปเดตสถานะออนไลน์
+    await redis.set(`online:${myEmail}`, 'active', { ex: 300 })
+
+    // 2. ดึงรายชื่อผู้ใช้ทั้งหมด
+    const userKeys = await redis.keys('user:*')
+    if (userKeys && userKeys.length > 0) {
+      const allData = await Promise.all(
+        userKeys.map(async (key) => {
+          try {
+            const data: any = await redis.get(key)
+            if (!data || !data.email) return null
+            const isOnline = await redis.get(`online:${data.email}`)
+            return { ...data, isOnline: !!isOnline }
+          } catch (e) {
+            return null
+          }
+        })
+      )
+      validUsers = allData.filter(u => u !== null)
+    }
+  } catch (error) {
+    console.error("Dashboard Error:", error)
+    // ถ้าพังจริงๆ ให้ส่งกลับไป Login
     redirect('/login')
   }
-
-  // อัปเดตสถานะออนไลน์
-  await redis.set(`online:${myEmail}`, 'active', { ex: 300 })
-
-  const userKeys = await redis.keys('user:*')
-  const users = await Promise.all(
-    userKeys.map(async (key) => {
-      const data: any = await redis.get(key)
-      if (!data) return null
-      const isOnline = await redis.get(`online:${data.email}`)
-      return { ...data, isOnline: !!isOnline }
-    })
-  )
-
-  const validUsers = users.filter(u => u !== null)
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans">
@@ -41,7 +61,7 @@ export default async function DashboardPage() {
             <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-bold text-white shadow-lg">A</div>
             <div>
               <h2 className="font-bold text-lg text-white leading-none">Admin Panel</h2>
-              <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider font-semibold">{me?.role}</p>
+              <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider font-semibold">{me?.role || 'user'}</p>
             </div>
           </div>
           <div className="flex items-center gap-6">
@@ -58,7 +78,7 @@ export default async function DashboardPage() {
         <header className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
             <h1 className="text-4xl font-extrabold text-white tracking-tight">Users Management</h1>
-            <p className="text-slate-400 mt-2">จัดการสมาชิกและตรวจสอบสถานะการเข้าใช้งานระบบ</p>
+            <p className="text-slate-400 mt-2">จัดการสมาชิกและตรวจสอบสถานะออนไลน์</p>
           </div>
           <div className="bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 rounded-2xl text-indigo-400 text-sm font-medium">
             Total Users: {validUsers.length}
@@ -84,11 +104,11 @@ export default async function DashboardPage() {
 
               <div className="flex items-center gap-4 mb-6">
                 <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-xl font-bold text-white uppercase shadow-lg">
-                  {user.email[0]}
+                  {user.email ? user.email[0] : '?'}
                 </div>
                 <div>
                   <h3 className="font-bold text-white truncate max-w-[150px]">{user.email}</h3>
-                  <span className={`text-[10px] font-black uppercase tracking-widest ${user.role === 'admin' ? 'text-amber-400' : 'text-slate-500'}`}>{user.role}</span>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${user.role === 'admin' ? 'text-amber-400' : 'text-slate-500'}`}>{user.role || 'user'}</span>
                 </div>
               </div>
 
