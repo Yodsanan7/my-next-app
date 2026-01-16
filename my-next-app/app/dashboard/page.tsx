@@ -1,4 +1,3 @@
-// app/dashboard/page.tsx
 import { redis } from "@/lib/redis"
 import { logout, adminDeleteUser } from "@/lib/actions"
 import { cookies } from "next/headers"
@@ -10,11 +9,8 @@ export default async function DashboardPage() {
   if (!myEmail) redirect('/login')
 
   const me: any = await redis.get(`user:${myEmail}`)
-  
-  // อัปเดตสถานะออนไลน์ตัวเอง
   await redis.set(`online:${myEmail}`, 'active', { ex: 300 })
 
-  // ดึงรายชื่อทั้งหมด
   const userKeys = await redis.keys('user:*')
   const users = await Promise.all(
     userKeys.map(async (key) => {
@@ -25,42 +21,77 @@ export default async function DashboardPage() {
   )
 
   return (
-    <div className="p-8 max-w-4xl mx-auto bg-gray-50 min-h-screen">
-      <div className="flex justify-between items-center mb-8 bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-800">จัดการสมาชิก</h1>
-          <p className="text-sm text-gray-500">คุณล็อกอินเป็น: <span className="font-semibold">{myEmail}</span> ({me?.role})</p>
+    <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans">
+      {/* Header Bar */}
+      <nav className="border-b border-white/5 bg-slate-900/50 backdrop-blur-md sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20">A</div>
+            <div>
+              <h2 className="font-bold text-lg text-white leading-none">Admin Panel</h2>
+              <p className="text-xs text-slate-500 mt-1 uppercase tracking-wider font-semibold">{me?.role}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-6">
+            <span className="text-sm text-slate-400 hidden sm:block">Welcome, <span className="text-indigo-400 font-medium">{myEmail}</span></span>
+            <form action={logout}>
+              <button className="bg-slate-800 hover:bg-red-500/10 hover:text-red-400 text-slate-300 px-5 py-2.5 rounded-xl text-sm font-semibold transition-all border border-slate-700">Log out</button>
+            </form>
+          </div>
         </div>
-        <form action={logout}>
-          <button className="bg-red-50 text-red-600 px-4 py-2 rounded-xl font-medium hover:bg-red-600 hover:text-white transition">
-            ออกจากระบบ
-          </button>
-        </form>
-      </div>
+      </nav>
 
-      <div className="grid gap-4">
-        <h2 className="text-lg font-semibold text-gray-700">สมาชิกทั้งหมด ({users.length} คน)</h2>
-        {users.map((user) => (
-          <div key={user.email} className="bg-white p-5 rounded-2xl shadow-sm flex justify-between items-center border border-gray-100">
-            <div className="flex items-center gap-4">
-              <div className={`w-3 h-3 rounded-full ${user.isOnline ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.6)]' : 'bg-gray-300'}`}></div>
-              <div>
-                <p className="font-bold text-gray-800">{user.email}</p>
-                <p className="text-xs text-gray-400 capitalize">{user.role}</p>
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto p-6 sm:p-10">
+        <header className="mb-10 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-extrabold text-white tracking-tight">Users Management</h1>
+            <p className="text-slate-400 mt-2">จัดการสมาชิกและตรวจสอบสถานะการเข้าใช้งานระบบ</p>
+          </div>
+          <div className="bg-indigo-500/10 border border-indigo-500/20 px-4 py-2 rounded-2xl text-indigo-400 text-sm font-medium">
+            Total Users: {users.length}
+          </div>
+        </header>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {users.map((user) => (
+            <div key={user.email} className="bg-slate-800/40 border border-white/5 p-6 rounded-[2rem] hover:border-indigo-500/30 transition-all group relative overflow-hidden">
+              <div className="absolute top-0 right-0 p-4">
+                {user.isOnline ? (
+                  <div className="flex items-center gap-2 bg-emerald-500/10 px-3 py-1 rounded-full border border-emerald-500/20">
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]"></span>
+                    <span className="text-[10px] font-bold text-emerald-500 uppercase">Online</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 bg-slate-700/50 px-3 py-1 rounded-full border border-slate-600">
+                    <span className="w-2 h-2 bg-slate-500 rounded-full"></span>
+                    <span className="text-[10px] font-bold text-slate-500 uppercase">Offline</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-4 mb-6">
+                <div className="w-14 h-14 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl flex items-center justify-center text-xl font-bold text-white uppercase shadow-lg">
+                  {user.email[0]}
+                </div>
+                <div>
+                  <h3 className="font-bold text-white truncate max-w-[150px]">{user.email}</h3>
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${user.role === 'admin' ? 'text-amber-400' : 'text-slate-500'}`}>{user.role}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mt-4">
+                <span className="text-xs text-slate-500 italic">Member since 2024</span>
+                {me?.role === 'admin' && user.email !== myEmail && (
+                  <form action={async () => { 'use server'; await adminDeleteUser(user.email); }}>
+                    <button className="bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white px-4 py-2 rounded-xl text-xs font-bold transition-all border border-red-500/20">Delete</button>
+                  </form>
+                )}
               </div>
             </div>
-
-            {/* ปุ่มลบสำหรับแอดมิน */}
-            {me?.role === 'admin' && user.email !== myEmail && (
-              <form action={async () => { 'use server'; await adminDeleteUser(user.email); }}>
-                <button className="text-sm bg-gray-50 text-gray-400 px-4 py-2 rounded-xl hover:bg-red-500 hover:text-white transition border border-gray-100">
-                  ลบสมาชิก
-                </button>
-              </form>
-            )}
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      </main>
     </div>
   )
 }
