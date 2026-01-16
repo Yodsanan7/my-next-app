@@ -1,75 +1,63 @@
-"use server"
-import { db } from "./db"
-import { cookies } from "next/headers"
-import { redirect } from "next/navigation"
-import { revalidatePath } from "next/cache"
+// lib/actions.ts
+'use server'
 
-// --- 1. สมัครสมาชิก ---
+import { redis } from './redis'
+import bcrypt from 'bcryptjs'
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
+
 export async function register(formData: FormData) {
-  const username = formData.get("username") as string
-  const password = formData.get("password") as string
+  const email = formData.get('email') as string
+  const password = formData.get('password') as string
 
-  const existingUser = await db.user.findUnique({ where: { username } })
+  // 1. ตรวจสอบว่ามี User นี้ใน Redis หรือยัง
+  const existingUser = await redis.get(`user:${email}`)
   if (existingUser) {
-    redirect("/register?error=exists")
+    throw new Error('User นี้มีอยู่ในระบบแล้ว')
   }
 
-  // คนสมัครใหม่จะเป็น USER เสมอ
-  await db.user.create({
-    data: { username, password, role: "USER" }
+  // 2. เข้ารหัสรหัสผ่านก่อนเก็บ (Security)
+  const hashedPassword = await bcrypt.hash(password, 10)
+
+  // 3. บันทึกลง Redis (เก็บเป็น Object)
+  // Key คือ user:email เช่น user:test@gmail.com
+  await redis.set(`user:${email}`, {
+    email,
+    password: hashedPassword,
   })
 
-  redirect("/login?success=registered")
+  redirect('/login')
 }
 
-// --- 2. เข้าสู่ระบบ ---
 export async function login(formData: FormData) {
-  const username = formData.get("username") as string
-  const password = formData.get("password") as string
+  const email = formData.get('email') as string
+  const password = formData.get('password') as string
 
-  const user = await db.user.findUnique({ where: { username } })
-
-  if (!user || user.password !== password) {
-    redirect("/login?error=invalid")
+  // 1. ดึงข้อมูล User จาก Redis
+  const user: any = await redis.get(`user:${email}`)
+  if (!user) {
+    throw new Error('ไม่พบ User หรือรหัสผ่านไม่ถูกต้อง')
   }
 
-  // อัปเดตสถานะออนไลน์
-  await db.user.update({ where: { id: user.id }, data: { isOnline: true } })
+  // 2. ตรวจสอบรหัสผ่านที่ส่งมา กับที่เก็บใน Redis
+  const isPasswordCorrect = await bcrypt.compare(password, user.password)
+  if (!isPasswordCorrect) {
+    throw new Error('รหัสผ่านไม่ถูกต้อง')
+  }
 
+  // 3. สร้าง Session ง่ายๆ ด้วย Cookie
   const cookieStore = await cookies()
-  cookieStore.set("session", user.username, { httpOnly: true })
-  
-  redirect("/dashboard")
+  cookieStore.set('session', email, { 
+    httpOnly: true, 
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 60 * 60 * 24 // 1 วัน
+  })
+
+  redirect('/dashboard')
 }
 
-// --- 3. ออกจากระบบ ---
 export async function logout() {
   const cookieStore = await cookies()
-  const session = cookieStore.get("session")?.value
-  
-  if (session) {
-    await db.user.update({ where: { username: session }, data: { isOnline: false } })
-  }
-
-  cookieStore.delete("session")
-  redirect("/login")
-}
-
-// --- 4. ลบผู้ใช้งาน (เช็คสิทธิ์ ADMIN เท่านั้น) ---
-export async function deleteUser(userId: number) {
-  const cookieStore = await cookies()
-  const session = cookieStore.get("session")?.value
-
-  if (!session) redirect("/login");
-
-  // เช็คสิทธิ์ในฐานข้อมูลว่าคนสั่งลบเป็น ADMIN หรือไม่
-  const requester = await db.user.findUnique({ where: { username: session } })
-
-  if (requester?.role === "ADMIN") {
-    await db.user.delete({ where: { id: userId } })
-    revalidatePath("/dashboard")
-  } else {
-    // ถ้าไม่ใช่ Admin จะลบไม่ได้
-    console.log("Unauthorized: Only ADMIN can delete users");
-  }
+  cookieStore.delete('session')
+  redirect('/login')
 }
